@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "screen-chatbot"
+version = "0.1.0"
+description = "A desktop application that captures screenshots and answers questions using Gemini 2.0"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Jeff Yang", email = "jeff52415@gmail.com"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pillow>=10.0.0",
+    "google-generativeai>=0.7.0",
+    "customtkinter>=5.2.0",
+    "google-genai",
+    "python-dotenv",
+    "mss",
+    "numpy>=2.0.0",
+    "pyaudio",
+    "opencv-python-headless==4.10.0.84",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/jeff52415/screen-chatbot"
+"Bug Tracker" = "https://github.com/jeff52415/screen-chatbot/issues"
+
+[tool.setuptools]
+packages = ["screen_chatbot"]
+
+[project.scripts]
+screen-chatbot = "screen_chatbot.main:main"
