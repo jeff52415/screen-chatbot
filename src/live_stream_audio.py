@@ -1,50 +1,7 @@
 # -*- coding: utf-8 -*-
-# Copyright 2025 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# reference: https://github.com/google-gemini/cookbook/blob/main/quickstarts/Get_started_LiveAPI.py
 
-"""
-## Setup
-
-To install the dependencies for this script, run:
-
-``` 
-pip install google-genai opencv-python pyaudio pillow mss
-```
-
-Before running this script, ensure the `GOOGLE_API_KEY` environment
-variable is set to the api-key you obtained from Google AI Studio.
-
-Important: **Use headphones**. This script uses the system default audio
-input and output, which often won't include echo cancellation. So to prevent
-the model from interrupting itself it is important that you use headphones. 
-
-## Run
-
-To run the script:
-
-```
-python Get_started_LiveAPI.py
-```
-
-The script takes a video-mode flag `--mode`, this can be "camera", "screen", or "none".
-The default is "camera". To share your screen run:
-
-```
-python Get_started_LiveAPI.py --mode screen
-```
-"""
-
+import argparse
 import asyncio
 import base64
 import io
@@ -53,16 +10,15 @@ import sys
 import traceback
 
 import cv2
-import pyaudio
-import PIL.Image
 import mss
+import PIL.Image
+import pyaudio
 from dotenv import load_dotenv
-import argparse
-
 from google import genai
 
 if sys.version_info < (3, 11, 0):
-    import taskgroup, exceptiongroup
+    import exceptiongroup
+    import taskgroup
 
     asyncio.TaskGroup = taskgroup.TaskGroup
     asyncio.ExceptionGroup = exceptiongroup.ExceptionGroup
@@ -74,10 +30,12 @@ RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE = 1024
 DEFAULT_MODE = "screen"
 
-#load the api key from the .env file
+# load the api key from the .env file
 load_dotenv()
 
-client = genai.Client(http_options={"api_version": "v1alpha"}, api_key=os.getenv("GEMINI_API_KEY"))
+client = genai.Client(
+    http_options={"api_version": "v1alpha"}, api_key=os.getenv("GEMINI_API_KEY")
+)
 
 # While Gemini 2.0 Flash is in experimental preview mode, only one of AUDIO or
 # TEXT may be passed here.
@@ -234,7 +192,9 @@ class AudioLoop:
     async def run(self):
         try:
             async with (
-                client.aio.live.connect(model=os.getenv("MODEL"), config=CONFIG) as session,
+                client.aio.live.connect(
+                    model=os.getenv("MODEL"), config=CONFIG
+                ) as session,
                 asyncio.TaskGroup() as tg,
             ):
                 self.session = session
@@ -258,7 +218,7 @@ class AudioLoop:
 
         except asyncio.CancelledError:
             pass
-        except ExceptionGroup as EG:
+        except exceptiongroup.ExceptionGroup as EG:
             self.audio_stream.close()
             traceback.print_exception(EG)
 

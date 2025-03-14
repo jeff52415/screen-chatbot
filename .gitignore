@@ -50,3 +50,6 @@ ENV/
 
 # Logs
 *.log 
+
+# Exported data
+exports/
