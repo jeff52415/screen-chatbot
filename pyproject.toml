@@ -29,6 +29,7 @@ dependencies = [
     "opencv-python-headless==4.10.0.84",
     "pydantic",
     "pydantic-settings",
+    "aiofiles",
 ]
 
 [project.optional-dependencies]

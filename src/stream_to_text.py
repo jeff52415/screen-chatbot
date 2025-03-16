@@ -2,19 +2,20 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import asyncio
 import collections
 import datetime
 import io
 import json
 import os
 import random
-import shutil
 import string
 import time
 import traceback
 import wave
 from typing import Any, Dict, List, Optional, Tuple
 
+import aiofiles
 import cv2
 import mss
 import PIL.Image
@@ -28,9 +29,11 @@ from pydantic_settings import BaseSettings
 # Load environment variables
 load_dotenv()
 
+
 # Configuration model using Pydantic
 class Config(BaseSettings):
     """Application configuration settings loaded from environment variables."""
+
     video_mode: str = Field(default="screen")
     monitor: int = Field(default=1)
     default_query: str = Field(default=".")
@@ -40,20 +43,18 @@ class Config(BaseSettings):
     audio_cache_seconds: int = Field(default=10)
     audio_device_index: int = Field(default=0)
     debug: bool = Field(default=False)
-    
+
     class Config:
         # This tells Pydantic to read from environment variables
-        env_file = '.env'
-        env_file_encoding = 'utf-8'
+        env_file = ".env"
+        env_file_encoding = "utf-8"
         # Allow extra fields
         extra = "ignore"
         # Use environment variable names with specific prefixes
         env_prefix = "DEFAULT_"
         # These fields have different environment variable names
-        env_mapping = {
-            "model": "MODEL",
-            "audio_device_index": "AUDIO_DEVICE_INDEX"
-        }
+        env_mapping = {"model": "MODEL", "audio_device_index": "AUDIO_DEVICE_INDEX"}
+
 
 # Create config instance
 config = Config()
@@ -402,7 +403,7 @@ class StreamToTextChatbot:
 
         return contents
 
-    def send_to_gemini(
+    async def send_to_gemini(
         self, prompt: str, image_bytes: bytes, audio_chunks: List[Dict] = None
     ) -> Tuple[str, Dict[str, int]]:
         """
@@ -434,7 +435,10 @@ class StreamToTextChatbot:
             contents = self.prepare_contents(prompt, image_bytes, audio_bytes)
 
             if not contents:
-                return "Error: No content to send to Gemini API", {"input_tokens": 0, "output_tokens": 0}
+                return "Error: No content to send to Gemini API", {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                }
 
             if self.debug:
                 print(f"Sending to Gemini API with {len(contents)} content parts")
@@ -447,23 +451,23 @@ class StreamToTextChatbot:
                 print("\nGemini: ", end="", flush=True)
                 response_text = ""
 
-                # Stream the response
-                response_stream = self.client.models.generate_content_stream(
+                async for chunk in await self.client.aio.models.generate_content_stream(
                     model=self.model, contents=contents
-                )
-
-                for chunk in response_stream:
+                ):
                     if chunk.text:
                         print(chunk.text, end="", flush=True)
                         response_text += chunk.text
-                    
-                    # Track token usage if available
-                    if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
-                        if hasattr(chunk.usage_metadata, 'prompt_token_count'):
-                            token_usage["input_tokens"] = chunk.usage_metadata.prompt_token_count or 0
-                        if hasattr(chunk.usage_metadata, 'candidates_token_count'):
-                            token_usage["output_tokens"] += chunk.usage_metadata.candidates_token_count or 0
 
+                    # Track token usage if available
+                    if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                        if hasattr(chunk.usage_metadata, "prompt_token_count"):
+                            token_usage["input_tokens"] = (
+                                chunk.usage_metadata.prompt_token_count or 0
+                            )
+                        if hasattr(chunk.usage_metadata, "candidates_token_count"):
+                            token_usage["output_tokens"] += (
+                                chunk.usage_metadata.candidates_token_count or 0
+                            )
 
                 return response_text, token_usage
             else:
@@ -471,15 +475,18 @@ class StreamToTextChatbot:
                 response = self.client.models.generate_content(
                     model=self.model, contents=contents
                 )
-                
+
                 # Track token usage if available
                 print("response usage_metadata: ", response.usage_metadata)
-                if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                    if hasattr(response.usage_metadata, 'prompt_token_count'):
-                        token_usage["input_tokens"] = response.usage_metadata.prompt_token_count or 0
-                    if hasattr(response.usage_metadata, 'candidates_token_count'):
-                        token_usage["output_tokens"] = response.usage_metadata.candidates_token_count or 0
-                
+                if hasattr(response, "usage_metadata") and response.usage_metadata:
+                    if hasattr(response.usage_metadata, "prompt_token_count"):
+                        token_usage["input_tokens"] = (
+                            response.usage_metadata.prompt_token_count or 0
+                        )
+                    if hasattr(response.usage_metadata, "candidates_token_count"):
+                        token_usage["output_tokens"] = (
+                            response.usage_metadata.candidates_token_count or 0
+                        )
 
                 # Return the response text and token usage
                 return response.text, token_usage
@@ -488,84 +495,92 @@ class StreamToTextChatbot:
             traceback.print_exc()
             return f"Error: {str(e)}", {"input_tokens": 0, "output_tokens": 0}
 
-    def load_token_usage(self) -> Dict[str, Any]:
+    async def load_token_usage(self) -> Dict[str, Any]:
         """
         Load token usage data from file if it exists.
-        
+
         Returns:
             Dictionary containing token usage data
         """
         token_usage_file = os.path.join(self.conversation_dir, "token_usage.json")
-        
+
         # Default structure if file doesn't exist
         default_data = {
             "total_input_tokens": 0,
             "total_output_tokens": 0,
-            "interactions": []
+            "interactions": [],
         }
-        
+
         try:
             if os.path.exists(token_usage_file):
-                with open(token_usage_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                async with aiofiles.open(token_usage_file, "r", encoding="utf-8") as f:
+                    content = await f.read()
+                    return json.loads(content)
             return default_data
         except Exception as e:
             print(f"\nError loading token usage data: {e}")
             traceback.print_exc()
             return default_data
 
-    def update_token_usage(self, token_usage: Dict[str, int]) -> Dict[str, Any]:
+    async def update_token_usage(self, token_usage: Dict[str, int]) -> Dict[str, Any]:
         """
         Update the token usage tracking for the conversation.
-        
+
         Args:
             token_usage: Dictionary with input_tokens and output_tokens
-            
+
         Returns:
             Updated token usage data
         """
         # Load current token usage data
-        conversation_token_usage = self.load_token_usage()
-        
+        conversation_token_usage = await self.load_token_usage()
+
         # Update total counts
         conversation_token_usage["total_input_tokens"] += token_usage["input_tokens"]
         conversation_token_usage["total_output_tokens"] += token_usage["output_tokens"]
-        
+
         # Add this interaction
         timestamp = datetime.datetime.now().isoformat()
-        conversation_token_usage["interactions"].append({
-            "timestamp": timestamp,
-            "input_tokens": token_usage["input_tokens"],
-            "output_tokens": token_usage["output_tokens"]
-        })
-        
+        conversation_token_usage["interactions"].append(
+            {
+                "timestamp": timestamp,
+                "input_tokens": token_usage["input_tokens"],
+                "output_tokens": token_usage["output_tokens"],
+            }
+        )
+
         # Save the updated token usage to a file
-        self.save_token_usage(conversation_token_usage)
-        
+        await self.save_token_usage(conversation_token_usage)
 
         return conversation_token_usage
-    
-    def save_token_usage(self, token_usage_data: Dict[str, Any]) -> None:
+
+    async def save_token_usage(self, token_usage_data: Dict[str, Any]) -> None:
         """
         Save the token usage data to a file.
-        
+
         Args:
             token_usage_data: Token usage data to save
         """
         try:
             # Create the token usage file path
             token_usage_file = os.path.join(self.conversation_dir, "token_usage.json")
-            
+
             # Save the token usage data
-            with open(token_usage_file, "w", encoding="utf-8") as f:
-                json.dump(token_usage_data, f, indent=2, ensure_ascii=False)
+            async with aiofiles.open(token_usage_file, "w", encoding="utf-8") as f:
+                await f.write(
+                    json.dumps(token_usage_data, indent=2, ensure_ascii=False)
+                )
         except Exception as e:
             print(f"\nError saving token usage data: {e}")
             traceback.print_exc()
 
-    def export_interaction_data(
-        self, text: str, image_bytes: bytes = None, audio_chunks: List[Dict] = None, 
-        token_usage: Dict[str, int] = None, response_text: str = None
+    async def export_interaction_data(
+        self,
+        text: str,
+        image_bytes: bytes = None,
+        audio_chunks: List[Dict] = None,
+        token_usage: Dict[str, int] = None,
+        response_text: str = None,
     ) -> None:
         """
         Export the current interaction data (text, image, audio) to files.
@@ -584,19 +599,21 @@ class StreamToTextChatbot:
             base_filename = f"{self.conversation_dir}/export_{self.session_id}_{self.export_count}_{timestamp}"
 
             # Export text
-            if self.debug:  
-                with open(f"{base_filename}_text.txt", "w", encoding="utf-8") as f:
-                    f.write(text)
-                
+            if self.debug:
+                async with aiofiles.open(
+                    f"{base_filename}_text.txt", "w", encoding="utf-8"
+                ) as f:
+                    await f.write(text)
 
             # Export screenshot if available
             if image_bytes and self.debug:
                 # Save the image bytes directly to a file
-                with open(f"{base_filename}_image.jpg", "wb") as f:
-                    f.write(image_bytes)
+                async with aiofiles.open(f"{base_filename}_image.jpg", "wb") as f:
+                    await f.write(image_bytes)
 
             # Export audio data
             if audio_chunks and self.debug:
+                # For wave files, we need to use synchronous IO as wave module doesn't support async
                 # Create a WAV file with the cached audio
                 with wave.open(f"{base_filename}_audio.wav", "wb") as wf:
                     wf.setnchannels(CHANNELS)
@@ -616,7 +633,6 @@ class StreamToTextChatbot:
                 else:
                     audio_source = str(self.audio_device_index)
 
-
             # Create a metadata file with information about the export
             metadata = {
                 "timestamp": timestamp,
@@ -634,11 +650,11 @@ class StreamToTextChatbot:
                 "conversation_name": self.conversation_name,
                 "model": self.model,
             }
-            
+
             # Add response text if available
             if response_text:
                 metadata["response_text"] = response_text
-            
+
             # Add token usage if available
             if token_usage:
                 metadata["token_usage"] = {
@@ -647,15 +663,16 @@ class StreamToTextChatbot:
                 }
 
             if self.debug:
-                with open(f"{base_filename}_metadata.json", "w", encoding="utf-8") as f:
-                    json.dump(metadata, f, indent=2, ensure_ascii=False)
-
+                async with aiofiles.open(
+                    f"{base_filename}_metadata.json", "w", encoding="utf-8"
+                ) as f:
+                    await f.write(json.dumps(metadata, indent=2, ensure_ascii=False))
 
         except Exception as e:
             print(f"\nError exporting interaction data: {e}")
             traceback.print_exc()
 
-    def run(self) -> None:
+    async def run(self) -> None:
         """
         Main loop that handles user input and sends requests to the Gemini API.
         """
@@ -663,9 +680,9 @@ class StreamToTextChatbot:
         print(
             "Type your question and press Enter to capture a screenshot/audio and get a response."
         )
-        
+
         # Print configuration for debugging
-        print(f"Configuration:")
+        print("Configuration:")
         print(f"  DEBUG: {self.debug}")
         print(f"  MONITOR INDEX: {self.monitor_index}")
         print(f"  DEFAULT QUERY: {self.default_query}")
@@ -743,19 +760,21 @@ class StreamToTextChatbot:
             if text.lower() == "test_audio":
                 self.test_audio_capture()
                 continue
-                
+
             # Check if user wants to see token usage
             if text.lower() == "token_usage":
-                token_data = self.load_token_usage()
+                token_data = await self.load_token_usage()
                 print("\nToken Usage Statistics:")
                 print(f"Total Input Tokens: {token_data['total_input_tokens']}")
                 print(f"Total Output Tokens: {token_data['total_output_tokens']}")
                 print(f"Total Interactions: {len(token_data['interactions'])}")
-                if token_data['interactions']:
+                if token_data["interactions"]:
                     print("\nRecent interactions:")
-                    for i in range(min(5, len(token_data['interactions']))):
-                        interaction = token_data['interactions'][-(i+1)]
-                        print(f"  {interaction['timestamp']}: Input={interaction['input_tokens']}, Output={interaction['output_tokens']}")
+                    for i in range(min(5, len(token_data["interactions"]))):
+                        interaction = token_data["interactions"][-(i + 1)]
+                        print(
+                            f"  {interaction['timestamp']}: Input={interaction['input_tokens']}, Output={interaction['output_tokens']}"
+                        )
                 continue
 
             # Use default prompt if user didn't type anything
@@ -784,13 +803,17 @@ class StreamToTextChatbot:
             start_time = time.time()
 
             # Get response from Gemini
-            response, token_usage = self.send_to_gemini(text, image_bytes, audio_chunks)
-            
+            response, token_usage = await self.send_to_gemini(
+                text, image_bytes, audio_chunks
+            )
+
             # Update token usage tracking
-            _ = self.update_token_usage(token_usage)
-            
+            _ = await self.update_token_usage(token_usage)
+
             # Update the metadata file with token usage and response
-            self.export_interaction_data(text, image_bytes, audio_chunks, token_usage, response)
+            await self.export_interaction_data(
+                text, image_bytes, audio_chunks, token_usage, response
+            )
 
             # Calculate and display response time
             elapsed_time = time.time() - start_time
@@ -922,6 +945,7 @@ class StreamToTextChatbot:
             filepath = os.path.join(self.conversation_dir, filename)
 
             try:
+                # Wave module doesn't support async IO, so we use synchronous IO here
                 with wave.open(filepath, "wb") as wf:
                     wf.setnchannels(CHANNELS)
                     wf.setsampwidth(pya.get_sample_size(FORMAT))
@@ -1035,7 +1059,7 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main():
+async def main():
     args = parse_arguments()
 
     # If --list-devices is specified, just list devices and exit
@@ -1065,10 +1089,10 @@ def main():
     )
 
     try:
-        chatbot.run()
+        await chatbot.run()
     except KeyboardInterrupt:
         print("\nProgram terminated by user")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
