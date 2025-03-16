@@ -1,121 +1,81 @@
 # Screen Chatbot
 
-A multimodal chatbot application that captures your screen, camera feed, and/or audio, allowing you to interact with Google's Gemini AI model through text or voice.
+Talk to Gemini AI using your screen, camera, and voice.
+
+## Quick Start
+
+1. **Clone and install**:
+   ```bash
+   git clone https://github.com/jeff52415/screen-chatbot
+   cd screen-chatbot
+   
+   # Choose one installation method:
+   pip install -e .         # Development install
+   # OR
+   uv sync                  # Faster install with uv
+   ```
+
+2. **Set up your API key**:
+   - Create a `.env` file with your Gemini API key:
+   ```
+   GEMINI_API_KEY=your_api_key_here
+   ```
+   - Get a key from: https://ai.google.dev/tutorials/setup
+   - Tip: You can copy `env.txt` to `.env` and edit it as a template
+
+3. **Run it**:
+   ```bash
+   # For voice conversations with audio responses:
+   python src/live_stream_audio.py
+   
+   # For text conversations with more options:
+   python src/stream_to_text.py
+   ```
+
+## Scripts
+
+### live_stream_audio.py
+- **Summary**: Creates a real-time voice conversation with Gemini. It continuously captures your screen or camera feed, records your voice through the microphone, and plays back Gemini's responses as audio. This creates a natural, conversational experience similar to talking with a person.
+- **Input**: Your voice, screen or camera
+- **Output**: Gemini's voice responses
+- **Best for**: Natural conversations with voice
+- **Note**: Use headphones to prevent feedback
+
+### stream_to_text.py
+- **Summary**: Provides a more flexible interaction with Gemini. It captures your screen or camera, can record audio from your microphone, and accepts text input. Gemini responds with text, which is displayed in the terminal. This script offers more control options during the session and automatically saves your entire conversation, including screenshots and audio recordings.
+- **Input**: Your text, screen or camera, optional voice
+- **Output**: Gemini's text responses
+- **Best for**: Detailed interactions with more control
+- **Note**: Saves conversation history and screenshots
 
 ## Features
 
-- **Multiple Input Modalities**:
-  - Screen capture
-  - Camera capture
-  - Audio recording (microphone or system audio)
-  - Text input
-  
-- **Multiple Output Modalities**:
-  - Text responses
-  - Audio responses (with `live_stream_audio.py`)
-  
-- **Data Export**:
-  - Automatically saves conversations, screenshots, and audio recordings
-  - Organizes data in conversation-specific folders
+- Capture your screen or camera
+- Use your voice or type text
+- Get text or voice responses
+- Automatically save conversations
 
-## Available Scripts
 
-The project includes three main Python scripts, each with different capabilities:
+## Configuration
 
-### 1. `live_stream_audio.py`
+All settings can be configured in your `.env` file:
 
-Real-time bidirectional communication with Gemini AI:
-- Captures your voice input
-- Captures screenshots or camera feed
-- Returns audio responses from Gemini
-- Best used with headphones to prevent feedback
+```
+# Required
+GEMINI_API_KEY=your_api_key_here
 
-```bash
-python src/live_stream_audio.py --mode [camera|screen|none]
+# Optional (defaults shown)
+MODEL=gemini-2.0-flash-exp
+RESPONSE_MODALITIES=TEXT  # or AUDIO
+DEFAULT_QUERY="."
+DEFAULT_VIDEO_MODE=screen  # none, screen, camera
+DEFAULT_MONITOR=1
+DEFAULT_AUDIO_ENABLED=true
+AUDIO_DEVICE_INDEX=0
+DEFAULT_AUDIO_CACHE_SECONDS=10
+DEFAULT_DEBUG=false
 ```
 
-### 2. `live_stream_text.py`
-
-Multimodal interaction with text-based responses:
-- Captures audio (from microphone or system audio)
-- Captures screenshots or camera feed
-- Triggered by text input
-- Stores all input data in the exports folder
-- Supports specific audio device selection
-
-```bash
-python src/live_stream_text.py --mode [camera|screen|none] --audio-device-index [index]
-```
-
-### 3. `stream_to_text.py`
-
-Simplified interaction focused on visual input:
-- Captures screenshots or camera feed
-- Takes text input
-- Returns text responses
-- No audio processing
-
-```bash
-python src/stream_to_text.py --mode [camera|screen]
-```
-
-## Requirements
-
-- Python 3.12 or higher 
-- Google Gemini API key (get one from https://ai.google.dev/tutorials/setup)
-- For audio capture: headphones is necessary 
-
-## Installation
-
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/yourusername/screen-chatbot.git
-   cd screen-chatbot
-   ```
-
-2. Install the required dependencies:
-
-   Using pip (standard):
-   ```bash
-   pip install .
-   ```
-   
-   Or using uv (faster alternative):
-   ```bash
-   # Install dependencies with uv
-   uv sync
-   ```
-   
-   Learn more about uv at: https://pypi.org/project/uv/
-
-3. Create a `.env` file in the project root with your configuration (see `env.txt` for reference):
-   ```
-   GEMINI_API_KEY=your_api_key_here
-   MODEL=gemini-2.0-flash-exp
-   RESPONSE_MODALITIES=TEXT  # or AUDIO
-   SYSTEM_PROMPT="You are a helpful assistant and answer in a friendly tone."
-   DEFAULT_QUERY="."
-   ```
-
-
-## Data Export
-
-`live_stream_text.py` automatically exports conversation data to the `exports/[conversation_name]` directory, including:
-- Text queries
-- Screenshots
-- Audio recordings
-- Metadata
-
-## Interaction
-
-1. Start the application with your preferred script
-2. Type your question or message and press Enter
-3. The application will capture the specified inputs and send them to Gemini
-4. View or listen to Gemini's response
-5. Type 'q' to quit the application
-
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Need Help?
+- Conversations are saved in the `exports/` folder if debug mode is activated.
 
