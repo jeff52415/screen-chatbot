@@ -43,6 +43,9 @@ class Config(BaseSettings):
     audio_cache_seconds: int = Field(default=10)
     audio_device_index: int = Field(default=0)
     debug: bool = Field(default=False)
+    system_prompt: str = Field(
+        default="You are a helpful assistant and answer in a friendly tone."
+    )
 
     class Config:
         # This tells Pydantic to read from environment variables
@@ -91,6 +94,7 @@ class StreamToTextChatbot:
         audio_cache_seconds: int = config.audio_cache_seconds,
         conversation_name: Optional[str] = None,
         debug: bool = config.debug,
+        system_prompt: str = config.system_prompt,
     ) -> None:
         """
         Initialize the StreamToTextChatbot with specified settings.
@@ -116,6 +120,7 @@ class StreamToTextChatbot:
         self.audio_device_index = audio_device_index
         self.audio_cache_seconds = audio_cache_seconds
         self.debug = debug
+        self.system_prompt = system_prompt
         # Create export directory with subfolder
         self.export_dir = "exports"
         os.makedirs(self.export_dir, exist_ok=True)
@@ -452,7 +457,11 @@ class StreamToTextChatbot:
                 response_text = ""
 
                 async for chunk in await self.client.aio.models.generate_content_stream(
-                    model=self.model, contents=contents
+                    model=self.model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=self.system_prompt
+                    ),
                 ):
                     if chunk.text:
                         print(chunk.text, end="", flush=True)
@@ -690,6 +699,7 @@ class StreamToTextChatbot:
         print(f"  STREAMING: {self.streaming}")
         print(f"  AUDIO ENABLED: {self.audio_enabled}")
         print(f"  AUDIO_CACHE_SECONDS: {self.audio_cache_seconds}")
+        print(f"  SYSTEM PROMPT: {self.system_prompt}")
         if self.video_mode in ["screen", "camera"]:
             print(f"  VIDEO_MODE: {self.video_mode} (enabled)")
         else:
