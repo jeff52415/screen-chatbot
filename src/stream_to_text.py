@@ -22,21 +22,41 @@ import pyaudio
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 # Load environment variables
 load_dotenv()
 
-# Default settings
-DEFAULT_VIDEO_MODE = os.getenv("DEFAULT_VIDEO_MODE", "screen")
-DEFAULT_MONITOR = int(os.getenv("DEFAULT_MONITOR", 1))  # Default to the primary monitor
-DEFAULT_QUERY = os.getenv("DEFAULT_QUERY", ".")
-DEFAULT_MODEL = os.getenv("MODEL", "gemini-2.0-flash-exp")
-DEFAULT_STREAMING = os.getenv("DEFAULT_STREAMING", "true")
-DEFAULT_AUDIO_ENABLED = os.getenv("DEFAULT_AUDIO_ENABLED", "true")
-DEFAULT_AUDIO_CACHE_SECONDS = int(
-    os.getenv("DEFAULT_AUDIO_CACHE_SECONDS", 10)
-)  # Default to 10 seconds of audio cache
-DEFAULT_AUDIO_DEVICE_INDEX = int(os.getenv("AUDIO_DEVICE_INDEX", 0))
+# Configuration model using Pydantic
+class Config(BaseSettings):
+    """Application configuration settings loaded from environment variables."""
+    video_mode: str = Field(default="screen")
+    monitor: int = Field(default=1)
+    default_query: str = Field(default=".")
+    model: str = Field(default="gemini-2.0-flash-exp")
+    streaming: bool = Field(default=True)
+    audio_enabled: bool = Field(default=True)
+    audio_cache_seconds: int = Field(default=10)
+    audio_device_index: int = Field(default=0)
+    debug: bool = Field(default=False)
+    
+    class Config:
+        # This tells Pydantic to read from environment variables
+        env_file = '.env'
+        env_file_encoding = 'utf-8'
+        # Allow extra fields
+        extra = "ignore"
+        # Use environment variable names with specific prefixes
+        env_prefix = "DEFAULT_"
+        # These fields have different environment variable names
+        env_mapping = {
+            "model": "MODEL",
+            "audio_device_index": "AUDIO_DEVICE_INDEX"
+        }
+
+# Create config instance
+config = Config()
 
 
 # Audio configuration constants
@@ -60,15 +80,16 @@ class StreamToTextChatbot:
 
     def __init__(
         self,
-        video_mode: str = DEFAULT_VIDEO_MODE,
-        monitor_index: int = DEFAULT_MONITOR,
-        default_query: str = DEFAULT_QUERY,
-        model: str = DEFAULT_MODEL,
-        streaming: bool = DEFAULT_STREAMING,
-        audio_enabled: bool = DEFAULT_AUDIO_ENABLED,
-        audio_device_index: Optional[int] = None,
-        audio_cache_seconds: int = DEFAULT_AUDIO_CACHE_SECONDS,
+        video_mode: str = config.video_mode,
+        monitor_index: int = config.monitor,
+        default_query: str = config.default_query,
+        model: str = config.model,
+        streaming: bool = config.streaming,
+        audio_enabled: bool = config.audio_enabled,
+        audio_device_index: Optional[int] = config.audio_device_index,
+        audio_cache_seconds: int = config.audio_cache_seconds,
         conversation_name: Optional[str] = None,
+        debug: bool = config.debug,
     ) -> None:
         """
         Initialize the StreamToTextChatbot with specified settings.
@@ -83,6 +104,7 @@ class StreamToTextChatbot:
             audio_device_index: Index of the audio device to use
             audio_cache_seconds: Number of seconds of audio to cache
             conversation_name: Name for the conversation subfolder (random if None)
+            debug: Whether to print debug information
         """
         self.video_mode = video_mode
         self.monitor_index = monitor_index
@@ -92,7 +114,7 @@ class StreamToTextChatbot:
         self.audio_enabled = audio_enabled
         self.audio_device_index = audio_device_index
         self.audio_cache_seconds = audio_cache_seconds
-
+        self.debug = debug
         # Create export directory with subfolder
         self.export_dir = "exports"
         os.makedirs(self.export_dir, exist_ok=True)
@@ -138,11 +160,12 @@ class StreamToTextChatbot:
     def _setup_audio(self) -> None:
         """Set up audio capture with the specified device."""
         try:
-            print("\nSetting up audio capture...")
-            print(f"Audio enabled: {self.audio_enabled}")
+            if self.debug:
+                print("\nSetting up audio capture...")
+                print(f"Audio enabled: {self.audio_enabled}")
 
-            # List available devices for debugging
-            print("Available audio devices:")
+                # List available devices for debugging
+                print("Available audio devices:")
             for i in range(pya.get_device_count()):
                 info = pya.get_device_info_by_index(i)
                 device_type = []
@@ -151,7 +174,8 @@ class StreamToTextChatbot:
                 if info["maxOutputChannels"] > 0:
                     device_type.append("OUTPUT")
                 device_type = "+".join(device_type)
-                print(f"  [{i}] {info['name']} ({device_type})")
+                if self.debug:
+                    print(f"  [{i}] {info['name']} ({device_type})")
 
             # If a specific device index was provided, use it
             if self.audio_device_index is not None:
@@ -195,8 +219,9 @@ class StreamToTextChatbot:
                 frames_per_buffer=CHUNK_SIZE,
             )
 
-            print("Audio stream opened successfully!")
-            print(f"Audio cache size: {self.audio_cache_seconds} seconds")
+            if self.debug:
+                print("Audio stream opened successfully!")
+                print(f"Audio cache size: {self.audio_cache_seconds} seconds")
 
         except Exception as e:
             print(f"Error setting up audio: {e}")
@@ -379,7 +404,7 @@ class StreamToTextChatbot:
 
     def send_to_gemini(
         self, prompt: str, image_bytes: bytes, audio_chunks: List[Dict] = None
-    ) -> str:
+    ) -> Tuple[str, Dict[str, int]]:
         """
         Send the prompt, image, and audio to the Gemini API.
 
@@ -389,27 +414,33 @@ class StreamToTextChatbot:
             audio_chunks: List of audio chunks to send
 
         Returns:
-            Response text from Gemini
+            Tuple containing response text and token usage dictionary
         """
         try:
             # Convert audio chunks to WAV file
             audio_bytes = b""
             if audio_chunks and len(audio_chunks) > 0:
                 audio_duration = len(audio_chunks) * CHUNK_SIZE / SEND_SAMPLE_RATE
-                print(
-                    f"Sending {audio_duration:.2f} seconds of audio ({len(audio_chunks)} chunks)"
-                )
+                if self.debug:
+                    print(
+                        f"Sending {audio_duration:.2f} seconds of audio ({len(audio_chunks)} chunks)"
+                    )
                 audio_bytes = self.create_wav_from_chunks(audio_chunks)
             else:
-                print("No audio chunks to send")
+                if self.debug:
+                    print("No audio chunks to send")
 
             # Prepare contents in the correct order
             contents = self.prepare_contents(prompt, image_bytes, audio_bytes)
 
             if not contents:
-                return "Error: No content to send to Gemini API"
+                return "Error: No content to send to Gemini API", {"input_tokens": 0, "output_tokens": 0}
 
-            print(f"Sending to Gemini API with {len(contents)} content parts")
+            if self.debug:
+                print(f"Sending to Gemini API with {len(contents)} content parts")
+
+            # Initialize token counters for this interaction
+            token_usage = {"input_tokens": 0, "output_tokens": 0}
 
             if self.streaming:
                 # Use streaming mode
@@ -425,33 +456,126 @@ class StreamToTextChatbot:
                     if chunk.text:
                         print(chunk.text, end="", flush=True)
                         response_text += chunk.text
+                    
+                    # Track token usage if available
+                    if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
+                        if hasattr(chunk.usage_metadata, 'prompt_token_count'):
+                            token_usage["input_tokens"] = chunk.usage_metadata.prompt_token_count or 0
+                        if hasattr(chunk.usage_metadata, 'candidates_token_count'):
+                            token_usage["output_tokens"] += chunk.usage_metadata.candidates_token_count or 0
 
-                # Add a newline after streaming is complete
-                print()
-                return response_text
+
+                return response_text, token_usage
             else:
                 # Use non-streaming mode
                 response = self.client.models.generate_content(
                     model=self.model, contents=contents
                 )
+                
+                # Track token usage if available
+                print("response usage_metadata: ", response.usage_metadata)
+                if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                    if hasattr(response.usage_metadata, 'prompt_token_count'):
+                        token_usage["input_tokens"] = response.usage_metadata.prompt_token_count or 0
+                    if hasattr(response.usage_metadata, 'candidates_token_count'):
+                        token_usage["output_tokens"] = response.usage_metadata.candidates_token_count or 0
+                
 
-                # Return the response text
-                return response.text
+                # Return the response text and token usage
+                return response.text, token_usage
         except Exception as e:
             print(f"\nError sending to Gemini API: {e}")
             traceback.print_exc()
-            return f"Error: {str(e)}"
+            return f"Error: {str(e)}", {"input_tokens": 0, "output_tokens": 0}
+
+    def load_token_usage(self) -> Dict[str, Any]:
+        """
+        Load token usage data from file if it exists.
+        
+        Returns:
+            Dictionary containing token usage data
+        """
+        token_usage_file = os.path.join(self.conversation_dir, "token_usage.json")
+        
+        # Default structure if file doesn't exist
+        default_data = {
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "interactions": []
+        }
+        
+        try:
+            if os.path.exists(token_usage_file):
+                with open(token_usage_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            return default_data
+        except Exception as e:
+            print(f"\nError loading token usage data: {e}")
+            traceback.print_exc()
+            return default_data
+
+    def update_token_usage(self, token_usage: Dict[str, int]) -> Dict[str, Any]:
+        """
+        Update the token usage tracking for the conversation.
+        
+        Args:
+            token_usage: Dictionary with input_tokens and output_tokens
+            
+        Returns:
+            Updated token usage data
+        """
+        # Load current token usage data
+        conversation_token_usage = self.load_token_usage()
+        
+        # Update total counts
+        conversation_token_usage["total_input_tokens"] += token_usage["input_tokens"]
+        conversation_token_usage["total_output_tokens"] += token_usage["output_tokens"]
+        
+        # Add this interaction
+        timestamp = datetime.datetime.now().isoformat()
+        conversation_token_usage["interactions"].append({
+            "timestamp": timestamp,
+            "input_tokens": token_usage["input_tokens"],
+            "output_tokens": token_usage["output_tokens"]
+        })
+        
+        # Save the updated token usage to a file
+        self.save_token_usage(conversation_token_usage)
+        
+
+        return conversation_token_usage
+    
+    def save_token_usage(self, token_usage_data: Dict[str, Any]) -> None:
+        """
+        Save the token usage data to a file.
+        
+        Args:
+            token_usage_data: Token usage data to save
+        """
+        try:
+            # Create the token usage file path
+            token_usage_file = os.path.join(self.conversation_dir, "token_usage.json")
+            
+            # Save the token usage data
+            with open(token_usage_file, "w", encoding="utf-8") as f:
+                json.dump(token_usage_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"\nError saving token usage data: {e}")
+            traceback.print_exc()
 
     def export_interaction_data(
-        self, text: str, image_path: str = None, audio_chunks: List[Dict] = None
+        self, text: str, image_bytes: bytes = None, audio_chunks: List[Dict] = None, 
+        token_usage: Dict[str, int] = None, response_text: str = None
     ) -> None:
         """
         Export the current interaction data (text, image, audio) to files.
 
         Args:
             text: The text query being sent
-            image_path: Path to the screenshot image
+            image_bytes: Image bytes data
             audio_chunks: List of audio chunks
+            token_usage: Dictionary with input_tokens and output_tokens
+            response_text: The model's response text
         """
         try:
             # Create timestamp and increment counter for unique filenames
@@ -460,19 +584,19 @@ class StreamToTextChatbot:
             base_filename = f"{self.conversation_dir}/export_{self.session_id}_{self.export_count}_{timestamp}"
 
             # Export text
-            with open(f"{base_filename}_text.txt", "w", encoding="utf-8") as f:
-                f.write(text)
+            if self.debug:  
+                with open(f"{base_filename}_text.txt", "w", encoding="utf-8") as f:
+                    f.write(text)
+                
 
             # Export screenshot if available
-            if image_path and os.path.exists(image_path):
-                # Copy the screenshot to exports
-                shutil.copy(
-                    image_path,
-                    f"{base_filename}_image.jpg",
-                )
+            if image_bytes and self.debug:
+                # Save the image bytes directly to a file
+                with open(f"{base_filename}_image.jpg", "wb") as f:
+                    f.write(image_bytes)
 
             # Export audio data
-            if audio_chunks:
+            if audio_chunks and self.debug:
                 # Create a WAV file with the cached audio
                 with wave.open(f"{base_filename}_audio.wav", "wb") as wf:
                     wf.setnchannels(CHANNELS)
@@ -492,6 +616,7 @@ class StreamToTextChatbot:
                 else:
                     audio_source = str(self.audio_device_index)
 
+
             # Create a metadata file with information about the export
             metadata = {
                 "timestamp": timestamp,
@@ -509,11 +634,22 @@ class StreamToTextChatbot:
                 "conversation_name": self.conversation_name,
                 "model": self.model,
             }
+            
+            # Add response text if available
+            if response_text:
+                metadata["response_text"] = response_text
+            
+            # Add token usage if available
+            if token_usage:
+                metadata["token_usage"] = {
+                    "input_tokens": token_usage["input_tokens"],
+                    "output_tokens": token_usage["output_tokens"],
+                }
 
-            with open(f"{base_filename}_metadata.json", "w", encoding="utf-8") as f:
-                json.dump(metadata, f, indent=2, ensure_ascii=False)
+            if self.debug:
+                with open(f"{base_filename}_metadata.json", "w", encoding="utf-8") as f:
+                    json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-            print(f"\nExported interaction data to {base_filename}_*")
 
         except Exception as e:
             print(f"\nError exporting interaction data: {e}")
@@ -527,16 +663,27 @@ class StreamToTextChatbot:
         print(
             "Type your question and press Enter to capture a screenshot/audio and get a response."
         )
-        print(f"Streaming mode is {'enabled' if self.streaming else 'disabled'}.")
-        print(
-            f"Video mode is {'enabled (' + self.video_mode + ')' if self.video_mode != 'none' else 'disabled'}."
-        )
+        
+        # Print configuration for debugging
+        print(f"Configuration:")
+        print(f"  DEBUG: {self.debug}")
+        print(f"  MONITOR INDEX: {self.monitor_index}")
+        print(f"  DEFAULT QUERY: {self.default_query}")
+        print(f"  MODEL: {self.model}")
+        print(f"  STREAMING: {self.streaming}")
+        print(f"  AUDIO ENABLED: {self.audio_enabled}")
+        print(f"  AUDIO_CACHE_SECONDS: {self.audio_cache_seconds}")
+        if self.video_mode in ["screen", "camera"]:
+            print(f"  VIDEO_MODE: {self.video_mode} (enabled)")
+        else:
+            print(f"  VIDEO_MODE: {self.video_mode} (disabled)")
 
         print("Type 'q' to quit.")
         print("Type 'toggle' to toggle streaming mode.")
         print("Type 'audio' to toggle audio capture.")
         print("Type 'mode' to toggle video mode (none/screen/camera).")
         print("Type 'test_audio' to test audio capture and save a sample.")
+        print("Type 'token_usage' to display current token usage statistics.")
 
         # Start continuously capturing audio if enabled
         audio_cache_active = True if self.audio_enabled else False
@@ -596,6 +743,20 @@ class StreamToTextChatbot:
             if text.lower() == "test_audio":
                 self.test_audio_capture()
                 continue
+                
+            # Check if user wants to see token usage
+            if text.lower() == "token_usage":
+                token_data = self.load_token_usage()
+                print("\nToken Usage Statistics:")
+                print(f"Total Input Tokens: {token_data['total_input_tokens']}")
+                print(f"Total Output Tokens: {token_data['total_output_tokens']}")
+                print(f"Total Interactions: {len(token_data['interactions'])}")
+                if token_data['interactions']:
+                    print("\nRecent interactions:")
+                    for i in range(min(5, len(token_data['interactions']))):
+                        interaction = token_data['interactions'][-(i+1)]
+                        print(f"  {interaction['timestamp']}: Input={interaction['input_tokens']}, Output={interaction['output_tokens']}")
+                continue
 
             # Use default prompt if user didn't type anything
             if not text:
@@ -604,10 +765,9 @@ class StreamToTextChatbot:
 
             # Capture screenshot if video mode is enabled
             image_bytes = b""
-            filename = ""
             if self.video_mode in ["screen", "camera"]:
                 filename, image_bytes = self.capture_screenshot()
-                if not filename and not image_bytes:
+                if not image_bytes:
                     print("Failed to capture screenshot, continuing without image.")
 
             # Get audio data if enabled
@@ -616,21 +776,26 @@ class StreamToTextChatbot:
                 # Get a snapshot of the current audio cache
                 audio_chunks = list(self.audio_cache) if self.audio_cache else []
 
-            # Export interaction data before sending
-            self.export_interaction_data(text, filename, audio_chunks)
-
             # Send to Gemini API
-            print("Sending to Gemini API...")
+            if self.debug:
+                print("Sending to Gemini API...")
 
             # Start timing the response
             start_time = time.time()
 
             # Get response from Gemini
-            response = self.send_to_gemini(text, image_bytes, audio_chunks)
+            response, token_usage = self.send_to_gemini(text, image_bytes, audio_chunks)
+            
+            # Update token usage tracking
+            _ = self.update_token_usage(token_usage)
+            
+            # Update the metadata file with token usage and response
+            self.export_interaction_data(text, image_bytes, audio_chunks, token_usage, response)
 
             # Calculate and display response time
             elapsed_time = time.time() - start_time
-            print(f"\nResponse time: {elapsed_time:.2f} seconds")
+            if self.debug:
+                print(f"\nResponse time: {elapsed_time:.2f} seconds")
 
             # If not streaming, print the response
             if not self.streaming:
@@ -815,42 +980,42 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--video-mode",
         type=str,
-        default=DEFAULT_VIDEO_MODE,
+        default=config.video_mode,
         help="Source of visual input",
         choices=["camera", "screen", "none"],
     )
     parser.add_argument(
         "--monitor",
         type=int,
-        default=DEFAULT_MONITOR,
+        default=config.monitor,
         help="Monitor index to capture (0 is primary, 1 is secondary, etc.)",
     )
     parser.add_argument(
-        "--model", type=str, default=DEFAULT_MODEL, help="Gemini model to use"
+        "--model", type=str, default=config.model, help="Gemini model to use"
     )
     parser.add_argument(
         "--streaming",
         type=bool,
-        default=DEFAULT_STREAMING,
-        help="Enable streaming mode",
+        default=config.streaming,
+        help="Enable streaming mode (true/false)",
     )
     parser.add_argument(
         "--audio-enabled",
         type=bool,
-        default=DEFAULT_AUDIO_ENABLED,
-        help="Enable audio capture",
+        default=config.audio_enabled,
+        help="Enable audio capture (true/false)",
     )
     parser.add_argument(
         "--audio-device-index",
         type=int,
-        default=DEFAULT_AUDIO_DEVICE_INDEX,
+        default=config.audio_device_index,
         help="Specific audio device index to use (overrides automatic selection)",
     )
     parser.add_argument(
         "--audio-cache",
         type=int,
-        default=DEFAULT_AUDIO_CACHE_SECONDS,
-        help=f"Seconds of audio to cache before sending (default: {DEFAULT_AUDIO_CACHE_SECONDS})",
+        default=config.audio_cache_seconds,
+        help=f"Seconds of audio to cache before sending (default: {config.audio_cache_seconds})",
     )
     parser.add_argument(
         "--list-devices", action="store_true", help="List all audio devices and exit"
@@ -860,6 +1025,12 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         default=None,
         help="Name for the conversation subfolder (random if not specified)",
+    )
+    parser.add_argument(
+        "--debug",
+        type=bool,
+        default=config.debug,
+        help="Enable debug mode (true/false)",
     )
     return parser.parse_args()
 
@@ -890,6 +1061,7 @@ def main():
         audio_device_index=args.audio_device_index,
         audio_cache_seconds=args.audio_cache,
         conversation_name=args.conversation_name,
+        debug=args.debug,
     )
 
     try:
