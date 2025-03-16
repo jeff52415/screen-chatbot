@@ -13,7 +13,7 @@ import string
 import time
 import traceback
 import wave
-from typing import Tuple, Deque, Dict, Optional, List, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import mss
@@ -31,14 +31,16 @@ DEFAULT_VIDEO_MODE = os.getenv("DEFAULT_VIDEO_MODE", "screen")
 DEFAULT_MONITOR = int(os.getenv("DEFAULT_MONITOR", 1))  # Default to the primary monitor
 DEFAULT_QUERY = os.getenv("DEFAULT_QUERY", ".")
 DEFAULT_MODEL = os.getenv("MODEL", "gemini-2.0-flash-exp")
-DEFAULT_STREAMING = os.getenv("DEFAULT_STREAMING", "true") 
-DEFAULT_AUDIO_ENABLED = os.getenv("DEFAULT_AUDIO_ENABLED", "true") 
-DEFAULT_AUDIO_CACHE_SECONDS = int(os.getenv("DEFAULT_AUDIO_CACHE_SECONDS", 10))  # Default to 10 seconds of audio cache
+DEFAULT_STREAMING = os.getenv("DEFAULT_STREAMING", "true")
+DEFAULT_AUDIO_ENABLED = os.getenv("DEFAULT_AUDIO_ENABLED", "true")
+DEFAULT_AUDIO_CACHE_SECONDS = int(
+    os.getenv("DEFAULT_AUDIO_CACHE_SECONDS", 10)
+)  # Default to 10 seconds of audio cache
 DEFAULT_AUDIO_DEVICE_INDEX = int(os.getenv("AUDIO_DEVICE_INDEX", 0))
 
 
 # Audio configuration constants
-FORMAT = pyaudio.paInt16    
+FORMAT = pyaudio.paInt16
 CHANNELS = 1
 SEND_SAMPLE_RATE = 16000  # Gemini expects 16kHz audio
 RECEIVE_SAMPLE_RATE = 24000
@@ -91,8 +93,6 @@ class StreamToTextChatbot:
         self.audio_device_index = audio_device_index
         self.audio_cache_seconds = audio_cache_seconds
 
-
-
         # Create export directory with subfolder
         self.export_dir = "exports"
         os.makedirs(self.export_dir, exist_ok=True)
@@ -129,7 +129,7 @@ class StreamToTextChatbot:
         self.audio_cache = collections.deque(
             maxlen=int(SEND_SAMPLE_RATE * self.audio_cache_seconds / CHUNK_SIZE)
         )
-        
+
         # Initialize audio stream if audio is enabled
         self.audio_stream = None
         if self.audio_enabled:
@@ -140,7 +140,7 @@ class StreamToTextChatbot:
         try:
             print("\nSetting up audio capture...")
             print(f"Audio enabled: {self.audio_enabled}")
-            
+
             # List available devices for debugging
             print("Available audio devices:")
             for i in range(pya.get_device_count()):
@@ -152,15 +152,19 @@ class StreamToTextChatbot:
                     device_type.append("OUTPUT")
                 device_type = "+".join(device_type)
                 print(f"  [{i}] {info['name']} ({device_type})")
-            
+
             # If a specific device index was provided, use it
             if self.audio_device_index is not None:
                 try:
                     device_info = pya.get_device_info_by_index(self.audio_device_index)
                     self.audio_source = device_info["name"]
-                    print(f"Using specified audio device: {self.audio_source} (index: {self.audio_device_index})")
+                    print(
+                        f"Using specified audio device: {self.audio_source} (index: {self.audio_device_index})"
+                    )
                 except Exception as e:
-                    print(f"\nError using specified device index {self.audio_device_index}: {e}")
+                    print(
+                        f"\nError using specified device index {self.audio_device_index}: {e}"
+                    )
                     print("Falling back to default device selection")
                     # fallback to default device selection
                     self.audio_device_index = 0
@@ -171,11 +175,15 @@ class StreamToTextChatbot:
                 device_info = pya.get_default_input_device_info()
                 self.audio_source = device_info["name"]
                 self.audio_device_index = device_info["index"]
-                print(f"Using default audio device: {self.audio_source} (index: {self.audio_device_index})")
+                print(
+                    f"Using default audio device: {self.audio_source} (index: {self.audio_device_index})"
+                )
 
             # Check if the device has input channels
             if device_info["maxInputChannels"] <= 0:
-                print(f"Warning: Selected device has no input channels. Audio capture may not work.")
+                print(
+                    "Warning: Selected device has no input channels. Audio capture may not work."
+                )
 
             # Open the audio stream
             self.audio_stream = pya.open(
@@ -186,10 +194,10 @@ class StreamToTextChatbot:
                 input_device_index=self.audio_device_index,
                 frames_per_buffer=CHUNK_SIZE,
             )
-            
+
             print("Audio stream opened successfully!")
             print(f"Audio cache size: {self.audio_cache_seconds} seconds")
-            
+
         except Exception as e:
             print(f"Error setting up audio: {e}")
             traceback.print_exc()
@@ -201,7 +209,7 @@ class StreamToTextChatbot:
         """Clean up resources when the object is destroyed."""
         if self.camera is not None:
             self.camera.release()
-        
+
         if self.audio_stream is not None:
             self.audio_stream.close()
 
@@ -235,7 +243,6 @@ class StreamToTextChatbot:
                 # Resize if needed
                 img.thumbnail([1024, 1024])
 
-
                 # Get image bytes for API
                 image_io = io.BytesIO()
                 img.save(image_io, format="jpeg")
@@ -253,8 +260,6 @@ class StreamToTextChatbot:
 
                     # Resize if needed (Gemini has image size limits)
                     img.thumbnail([1024, 1024])
-
-
 
                     # Get image bytes for API
                     image_io = io.BytesIO()
@@ -274,7 +279,7 @@ class StreamToTextChatbot:
     def capture_audio(self) -> List[Dict]:
         """
         Capture audio from the microphone and store it in the cache.
-        
+
         Returns:
             List of audio chunks in the cache
         """
@@ -284,20 +289,24 @@ class StreamToTextChatbot:
         try:
             # Read audio data until we have filled the cache
             kwargs = {"exception_on_overflow": False} if __debug__ else {}
-            
+
             # Read a chunk of audio
             data = self.audio_stream.read(CHUNK_SIZE, **kwargs)
-            
+
             # Check if we got valid data
-            if data and len(data) == CHUNK_SIZE * 2:  # 16-bit audio = 2 bytes per sample
+            if (
+                data and len(data) == CHUNK_SIZE * 2
+            ):  # 16-bit audio = 2 bytes per sample
                 audio_chunk = {"data": data, "mime_type": "audio/pcm"}
-                
+
                 # Add to cache
                 self.audio_cache.append(audio_chunk)
-                
+
             else:
-                print(f"Warning: Received invalid audio data of length {len(data) if data else 0}")
-            
+                print(
+                    f"Warning: Received invalid audio data of length {len(data) if data else 0}"
+                )
+
             # Return a copy of the cache
             return list(self.audio_cache)
         except Exception as e:
@@ -308,65 +317,69 @@ class StreamToTextChatbot:
     def create_wav_from_chunks(self, audio_chunks: List[Dict]) -> bytes:
         """
         Create a WAV file from audio chunks.
-        
+
         Args:
             audio_chunks: List of audio chunks
-            
+
         Returns:
             WAV file as bytes
         """
         if not audio_chunks:
             return b""
-            
+
         # Create a WAV file in memory with the audio data
         audio_io = io.BytesIO()
         with wave.open(audio_io, "wb") as wf:
             wf.setnchannels(CHANNELS)
             wf.setsampwidth(pya.get_sample_size(FORMAT))
             wf.setframerate(SEND_SAMPLE_RATE)
-            
+
             # Write all audio chunks
             for chunk in audio_chunks:
                 wf.writeframes(chunk["data"])
-        
+
         # Reset the buffer position
         audio_io.seek(0)
-        
+
         # Return the WAV file as bytes
         return audio_io.read()
 
-    def prepare_contents(self, prompt: str, image_bytes: bytes, audio_bytes: bytes) -> List[Any]:
+    def prepare_contents(
+        self, prompt: str, image_bytes: bytes, audio_bytes: bytes
+    ) -> List[Any]:
         """
         Prepare the contents for the Gemini API in the correct order.
-        
+
         Args:
             prompt: Text prompt
             image_bytes: Image bytes
             audio_bytes: Audio bytes
-            
+
         Returns:
             List of contents for the Gemini API
         """
         contents = []
-        
+
         # 1. First add image content (if available)
         if image_bytes:
             contents.append(
                 types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
             )
-        
+
         # 2. Then add audio content (if available)
         if audio_bytes:
             contents.append(
                 types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
             )
-        
+
         # 3. Finally add text prompt
         contents.append(prompt)
-        
+
         return contents
 
-    def send_to_gemini(self, prompt: str, image_bytes: bytes, audio_chunks: List[Dict] = None) -> str:
+    def send_to_gemini(
+        self, prompt: str, image_bytes: bytes, audio_chunks: List[Dict] = None
+    ) -> str:
         """
         Send the prompt, image, and audio to the Gemini API.
 
@@ -383,19 +396,21 @@ class StreamToTextChatbot:
             audio_bytes = b""
             if audio_chunks and len(audio_chunks) > 0:
                 audio_duration = len(audio_chunks) * CHUNK_SIZE / SEND_SAMPLE_RATE
-                print(f"Sending {audio_duration:.2f} seconds of audio ({len(audio_chunks)} chunks)")
+                print(
+                    f"Sending {audio_duration:.2f} seconds of audio ({len(audio_chunks)} chunks)"
+                )
                 audio_bytes = self.create_wav_from_chunks(audio_chunks)
             else:
                 print("No audio chunks to send")
-            
+
             # Prepare contents in the correct order
             contents = self.prepare_contents(prompt, image_bytes, audio_bytes)
-            
+
             if not contents:
                 return "Error: No content to send to Gemini API"
 
             print(f"Sending to Gemini API with {len(contents)} content parts")
-            
+
             if self.streaming:
                 # Use streaming mode
                 print("\nGemini: ", end="", flush=True)
@@ -427,7 +442,9 @@ class StreamToTextChatbot:
             traceback.print_exc()
             return f"Error: {str(e)}"
 
-    def export_interaction_data(self, text: str, image_path: str = None, audio_chunks: List[Dict] = None) -> None:
+    def export_interaction_data(
+        self, text: str, image_path: str = None, audio_chunks: List[Dict] = None
+    ) -> None:
         """
         Export the current interaction data (text, image, audio) to files.
 
@@ -511,7 +528,9 @@ class StreamToTextChatbot:
             "Type your question and press Enter to capture a screenshot/audio and get a response."
         )
         print(f"Streaming mode is {'enabled' if self.streaming else 'disabled'}.")
-        print(f"Video mode is {'enabled (' + self.video_mode + ')' if self.video_mode != 'none' else 'disabled'}.")
+        print(
+            f"Video mode is {'enabled (' + self.video_mode + ')' if self.video_mode != 'none' else 'disabled'}."
+        )
 
         print("Type 'q' to quit.")
         print("Type 'toggle' to toggle streaming mode.")
@@ -521,7 +540,7 @@ class StreamToTextChatbot:
 
         # Start continuously capturing audio if enabled
         audio_cache_active = True if self.audio_enabled else False
-        
+
         # Start continuous audio recording in a separate thread if enabled
         if self.audio_enabled and audio_cache_active:
             self._start_continuous_audio_recording()
@@ -554,9 +573,11 @@ class StreamToTextChatbot:
                     audio_cache_active = not audio_cache_active
                     if audio_cache_active:
                         self._start_continuous_audio_recording()
-                    print(f"Audio capture {'enabled' if audio_cache_active else 'paused'}.")
+                    print(
+                        f"Audio capture {'enabled' if audio_cache_active else 'paused'}."
+                    )
                 continue
-                
+
             # Check if user wants to toggle video mode
             if text.lower() == "mode":
                 if self.video_mode == "none":
@@ -570,7 +591,7 @@ class StreamToTextChatbot:
                     self.video_mode = "none"
                 print(f"Video mode set to: {self.video_mode}")
                 continue
-                
+
             # Check if user wants to test audio
             if text.lower() == "test_audio":
                 self.test_audio_capture()
@@ -594,7 +615,7 @@ class StreamToTextChatbot:
             if self.audio_enabled and audio_cache_active:
                 # Get a snapshot of the current audio cache
                 audio_chunks = list(self.audio_cache) if self.audio_cache else []
-                
+
             # Export interaction data before sending
             self.export_interaction_data(text, filename, audio_chunks)
 
@@ -616,10 +637,13 @@ class StreamToTextChatbot:
                 print("\nGemini: " + response)
 
         # Clean up continuous audio recording thread if it exists
-        if hasattr(self, 'audio_recording_thread') and self.audio_recording_thread is not None:
+        if (
+            hasattr(self, "audio_recording_thread")
+            and self.audio_recording_thread is not None
+        ):
             self.stop_audio_recording = True
             self.audio_recording_thread.join(timeout=1.0)
-            
+
         print("\nExiting...")
 
     def _start_continuous_audio_recording(self) -> None:
@@ -628,43 +652,49 @@ class StreamToTextChatbot:
         This ensures audio is captured continuously without blocking the main thread.
         """
         import threading
-        
+
         # Stop existing recording thread if it exists
-        if hasattr(self, 'audio_recording_thread') and self.audio_recording_thread is not None:
+        if (
+            hasattr(self, "audio_recording_thread")
+            and self.audio_recording_thread is not None
+        ):
             self.stop_audio_recording = True
             self.audio_recording_thread.join(timeout=1.0)
-        
+
         # Reset the flag
         self.stop_audio_recording = False
-        
+
         # Define the recording function
         def record_audio_continuously():
             print("Starting continuous audio recording...")
-            
+
             if self.audio_stream is None:
                 print("Audio stream is not initialized. Setting up audio...")
                 self._setup_audio()
                 if self.audio_stream is None:
-                    print("Failed to initialize audio stream. Audio recording disabled.")
+                    print(
+                        "Failed to initialize audio stream. Audio recording disabled."
+                    )
                     return
-            
+
             # Clear the audio cache to start fresh
             self.audio_cache.clear()
-            
+
             kwargs = {"exception_on_overflow": False} if __debug__ else {}
-            
+
             try:
-                while not getattr(self, 'stop_audio_recording', False):
+                while not getattr(self, "stop_audio_recording", False):
                     # Read a chunk of audio
                     data = self.audio_stream.read(CHUNK_SIZE, **kwargs)
-                    
+
                     # Check if we got valid data
-                    if data and len(data) == CHUNK_SIZE * 2:  # 16-bit audio = 2 bytes per sample
+                    if (
+                        data and len(data) == CHUNK_SIZE * 2
+                    ):  # 16-bit audio = 2 bytes per sample
                         audio_chunk = {"data": data, "mime_type": "audio/pcm"}
-                        
+
                         # Add to cache
                         self.audio_cache.append(audio_chunk)
-                        
 
                     # Small sleep to prevent CPU overload
                     time.sleep(0.001)
@@ -673,29 +703,35 @@ class StreamToTextChatbot:
                 traceback.print_exc()
             finally:
                 print("Continuous audio recording stopped.")
-        
+
         # Start the recording thread
         self.audio_recording_thread = threading.Thread(target=record_audio_continuously)
-        self.audio_recording_thread.daemon = True  # Make thread exit when main program exits
+        self.audio_recording_thread.daemon = (
+            True  # Make thread exit when main program exits
+        )
         self.audio_recording_thread.start()
 
     def test_audio_capture(self) -> None:
         """Test audio capture and save a sample."""
         if not self.audio_enabled:
-            print("Audio capture is not enabled. Use --audio flag when starting the program.")
+            print(
+                "Audio capture is not enabled. Use --audio flag when starting the program."
+            )
             return
-            
+
         if self.audio_stream is None:
-            print("Audio stream is not initialized. There might be an issue with your audio setup.")
+            print(
+                "Audio stream is not initialized. There might be an issue with your audio setup."
+            )
             return
-            
+
         print("\nTesting audio capture...")
         print("Recording 5 seconds of audio...")
-        
+
         # Clear the audio cache
         if self.audio_cache:
             self.audio_cache.clear()
-            
+
         # Record for 5 seconds
         start_time = time.time()
         while time.time() - start_time < 5:
@@ -711,45 +747,53 @@ class StreamToTextChatbot:
             except Exception as e:
                 print(f"\nError during audio capture: {e}")
                 return
-                
+
         print("\nRecording complete!")
-        
+
         # Save the audio to a file
         if self.audio_cache:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"audio_test_{timestamp}.wav"
             filepath = os.path.join(self.conversation_dir, filename)
-            
+
             try:
                 with wave.open(filepath, "wb") as wf:
                     wf.setnchannels(CHANNELS)
                     wf.setsampwidth(pya.get_sample_size(FORMAT))
                     wf.setframerate(SEND_SAMPLE_RATE)
-                    
+
                     # Write all audio chunks
                     for chunk in self.audio_cache:
                         wf.writeframes(chunk["data"])
-                        
+
                 print(f"Audio sample saved to: {filepath}")
-                print(f"Audio duration: {len(self.audio_cache) * CHUNK_SIZE / SEND_SAMPLE_RATE:.2f} seconds")
-                
+                print(
+                    f"Audio duration: {len(self.audio_cache) * CHUNK_SIZE / SEND_SAMPLE_RATE:.2f} seconds"
+                )
+
                 # Create metadata
                 metadata = {
                     "timestamp": timestamp,
-                    "audio_device": getattr(self, "audio_source", str(self.audio_device_index)),
+                    "audio_device": getattr(
+                        self, "audio_source", str(self.audio_device_index)
+                    ),
                     "sample_rate": SEND_SAMPLE_RATE,
                     "channels": CHANNELS,
                     "format": "PCM_16",
-                    "duration_seconds": len(self.audio_cache) * CHUNK_SIZE / SEND_SAMPLE_RATE,
+                    "duration_seconds": len(self.audio_cache)
+                    * CHUNK_SIZE
+                    / SEND_SAMPLE_RATE,
                     "chunks": len(self.audio_cache),
                     "chunk_size": CHUNK_SIZE,
                 }
-                
+
                 # Save metadata
-                metadata_path = os.path.join(self.conversation_dir, f"audio_test_{timestamp}_metadata.json")
+                metadata_path = os.path.join(
+                    self.conversation_dir, f"audio_test_{timestamp}_metadata.json"
+                )
                 with open(metadata_path, "w", encoding="utf-8") as f:
                     json.dump(metadata, f, indent=2)
-                    
+
                 print("Audio test completed successfully!")
             except Exception as e:
                 print(f"Error saving audio sample: {e}")
@@ -788,30 +832,28 @@ def parse_arguments() -> argparse.Namespace:
         "--streaming",
         type=bool,
         default=DEFAULT_STREAMING,
-        help="Enable streaming mode"
+        help="Enable streaming mode",
     )
     parser.add_argument(
-        "--audio-enabled", 
+        "--audio-enabled",
         type=bool,
         default=DEFAULT_AUDIO_ENABLED,
-        help="Enable audio capture"
+        help="Enable audio capture",
     )
     parser.add_argument(
-        "--audio-device-index", 
-        type=int, 
+        "--audio-device-index",
+        type=int,
         default=DEFAULT_AUDIO_DEVICE_INDEX,
-        help="Specific audio device index to use (overrides automatic selection)"
+        help="Specific audio device index to use (overrides automatic selection)",
     )
     parser.add_argument(
-        "--audio-cache", 
-        type=int, 
+        "--audio-cache",
+        type=int,
         default=DEFAULT_AUDIO_CACHE_SECONDS,
-        help=f"Seconds of audio to cache before sending (default: {DEFAULT_AUDIO_CACHE_SECONDS})"
+        help=f"Seconds of audio to cache before sending (default: {DEFAULT_AUDIO_CACHE_SECONDS})",
     )
     parser.add_argument(
-        "--list-devices", 
-        action="store_true",
-        help="List all audio devices and exit"
+        "--list-devices", action="store_true", help="List all audio devices and exit"
     )
     parser.add_argument(
         "--conversation-name",
@@ -824,7 +866,7 @@ def parse_arguments() -> argparse.Namespace:
 
 def main():
     args = parse_arguments()
-    
+
     # If --list-devices is specified, just list devices and exit
     if args.list_devices:
         print("Available audio devices:")
