@@ -239,7 +239,7 @@ class StreamToTextChatbot:
         if self.audio_stream is not None:
             self.audio_stream.close()
 
-    def capture_screenshot(self) -> Tuple[str, bytes]:
+    async def capture_screenshot(self) -> Tuple[str, bytes]:
         """
         Capture a screenshot or camera frame and save it.
 
@@ -758,7 +758,7 @@ class StreamToTextChatbot:
 
             # Check if user wants to test audio
             if text.lower() == "test_audio":
-                self.test_audio_capture()
+                await self.test_audio_capture()
                 continue
 
             # Check if user wants to see token usage
@@ -785,7 +785,7 @@ class StreamToTextChatbot:
             # Capture screenshot if video mode is enabled
             image_bytes = b""
             if self.video_mode in ["screen", "camera"]:
-                filename, image_bytes = self.capture_screenshot()
+                filename, image_bytes = await self.capture_screenshot()
                 if not image_bytes:
                     print("Failed to capture screenshot, continuing without image.")
 
@@ -899,7 +899,7 @@ class StreamToTextChatbot:
         )
         self.audio_recording_thread.start()
 
-    def test_audio_capture(self) -> None:
+    async def test_audio_capture(self) -> None:
         """Test audio capture and save a sample."""
         if not self.audio_enabled:
             print(
@@ -931,7 +931,9 @@ class StreamToTextChatbot:
                 # Show progress
                 if int((time.time() - start_time) * 10) % 10 == 0:
                     print(".", end="", flush=True)
-                time.sleep(0.01)  # Small sleep to prevent CPU overload
+                await asyncio.sleep(
+                    0.01
+                )  # Small sleep to prevent CPU overload, using asyncio.sleep
             except Exception as e:
                 print(f"\nError during audio capture: {e}")
                 return
@@ -980,8 +982,8 @@ class StreamToTextChatbot:
                 metadata_path = os.path.join(
                     self.conversation_dir, f"audio_test_{timestamp}_metadata.json"
                 )
-                with open(metadata_path, "w", encoding="utf-8") as f:
-                    json.dump(metadata, f, indent=2)
+                async with aiofiles.open(metadata_path, "w", encoding="utf-8") as f:
+                    await f.write(json.dumps(metadata, indent=2))
 
                 print("Audio test completed successfully!")
             except Exception as e:
