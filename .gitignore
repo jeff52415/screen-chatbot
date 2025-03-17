@@ -53,3 +53,6 @@ ENV/
 
 # Exported data
 exports/
+
+# jupyter notebook
+*.ipynb
