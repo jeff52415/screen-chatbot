@@ -46,6 +46,7 @@ class Config(BaseSettings):
     system_prompt: str = Field(
         default="You are a helpful assistant and answer in a friendly tone."
     )
+    history: bool = Field(default=True)
 
     class Config:
         # This tells Pydantic to read from environment variables
@@ -56,7 +57,11 @@ class Config(BaseSettings):
         # Use environment variable names with specific prefixes
         env_prefix = "DEFAULT_"
         # These fields have different environment variable names
-        env_mapping = {"model": "MODEL", "audio_device_index": "AUDIO_DEVICE_INDEX"}
+        env_mapping = {
+            "model": "MODEL",
+            "audio_device_index": "AUDIO_DEVICE_INDEX",
+            "history": "HISTORY",
+        }
 
 
 # Create config instance
@@ -95,6 +100,7 @@ class StreamToTextChatbot:
         conversation_name: Optional[str] = None,
         debug: bool = config.debug,
         system_prompt: str = config.system_prompt,
+        history: bool = config.history,
     ) -> None:
         """
         Initialize the StreamToTextChatbot with specified settings.
@@ -110,6 +116,7 @@ class StreamToTextChatbot:
             audio_cache_seconds: Number of seconds of audio to cache
             conversation_name: Name for the conversation subfolder (random if None)
             debug: Whether to print debug information
+            history: Whether to use conversation history
         """
         self.video_mode = video_mode
         self.monitor_index = monitor_index
@@ -121,6 +128,9 @@ class StreamToTextChatbot:
         self.audio_cache_seconds = audio_cache_seconds
         self.debug = debug
         self.system_prompt = system_prompt
+        self.history = history
+        self.chat = None  # Will be initialized if history is enabled
+
         # Create export directory with subfolder
         self.export_dir = "exports"
         os.makedirs(self.export_dir, exist_ok=True)
@@ -147,6 +157,15 @@ class StreamToTextChatbot:
 
         # Initialize Gemini client
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+        # Initialize chat if history is enabled
+        if self.history:
+            self.chat = self.client.aio.chats.create(
+                model=self.model,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.system_prompt,
+                ),
+            )
 
         # Initialize camera if needed
         self.camera = None
@@ -451,54 +470,117 @@ class StreamToTextChatbot:
             # Initialize token counters for this interaction
             token_usage = {"input_tokens": 0, "output_tokens": 0}
 
-            if self.streaming:
-                # Use streaming mode
-                print("\nGemini: ", end="", flush=True)
-                response_text = ""
+            # Use chat interface if history is enabled, otherwise use generate_content
+            if self.history:
+                # Using chat interface with history
 
-                async for chunk in await self.client.aio.models.generate_content_stream(
-                    model=self.model,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=self.system_prompt
-                    ),
-                ):
-                    if chunk.text:
-                        print(chunk.text, end="", flush=True)
-                        response_text += chunk.text
+                assert hasattr(self, "chat"), "Chat not initialized"
+
+                # If we have media content (image/audio), we need to create a new chat session
+                # because the current Gemini chat API doesn't support images/audio in follow-up messages
+                if image_bytes or audio_bytes:
+                    if self.debug:
+                        print("Media content detected, creating new chat session")
+
+                if self.streaming:
+                    # Use streaming mode with chat
+                    print("\nGemini: ", end="", flush=True)
+                    response_text = ""
+
+                    # Send the current message with streaming
+                    async for chunk in await self.chat.send_message_stream(
+                        message=contents
+                    ):
+                        if chunk.text:
+                            print(chunk.text, end="", flush=True)
+                            response_text += chunk.text
+
+                        # Track token usage if available
+                        if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                            if hasattr(chunk.usage_metadata, "prompt_token_count"):
+                                token_usage["input_tokens"] = (
+                                    chunk.usage_metadata.prompt_token_count or 0
+                                )
+                            if hasattr(chunk.usage_metadata, "candidates_token_count"):
+                                token_usage["output_tokens"] += (
+                                    chunk.usage_metadata.candidates_token_count or 0
+                                )
+
+                    return response_text, token_usage
+                else:
+                    # Non-streaming mode with chat
+                    response = await self.chat.send_message(contents)
+                    response_text = response.text
 
                     # Track token usage if available
-                    if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
-                        if hasattr(chunk.usage_metadata, "prompt_token_count"):
+                    if hasattr(response, "usage_metadata") and response.usage_metadata:
+                        if hasattr(response.usage_metadata, "prompt_token_count"):
                             token_usage["input_tokens"] = (
-                                chunk.usage_metadata.prompt_token_count or 0
+                                response.usage_metadata.prompt_token_count or 0
                             )
-                        if hasattr(chunk.usage_metadata, "candidates_token_count"):
-                            token_usage["output_tokens"] += (
-                                chunk.usage_metadata.candidates_token_count or 0
+                        if hasattr(response.usage_metadata, "candidates_token_count"):
+                            token_usage["output_tokens"] = (
+                                response.usage_metadata.candidates_token_count or 0
                             )
 
-                return response_text, token_usage
+                    return response_text, token_usage
             else:
-                # Use non-streaming mode
-                response = self.client.models.generate_content(
-                    model=self.model, contents=contents
-                )
+                # Original implementation without history (using generate_content)
+                if self.streaming:
+                    # Use streaming mode
+                    print("\nGemini: ", end="", flush=True)
+                    response_text = ""
 
-                # Track token usage if available
-                print("response usage_metadata: ", response.usage_metadata)
-                if hasattr(response, "usage_metadata") and response.usage_metadata:
-                    if hasattr(response.usage_metadata, "prompt_token_count"):
-                        token_usage["input_tokens"] = (
-                            response.usage_metadata.prompt_token_count or 0
-                        )
-                    if hasattr(response.usage_metadata, "candidates_token_count"):
-                        token_usage["output_tokens"] = (
-                            response.usage_metadata.candidates_token_count or 0
-                        )
+                    async for (
+                        chunk
+                    ) in await self.client.aio.models.generate_content_stream(
+                        model=self.model,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=self.system_prompt
+                        ),
+                    ):
+                        if chunk.text:
+                            print(chunk.text, end="", flush=True)
+                            response_text += chunk.text
 
-                # Return the response text and token usage
-                return response.text, token_usage
+                        # Track token usage if available
+                        if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                            if hasattr(chunk.usage_metadata, "prompt_token_count"):
+                                token_usage["input_tokens"] = (
+                                    chunk.usage_metadata.prompt_token_count or 0
+                                )
+                            if hasattr(chunk.usage_metadata, "candidates_token_count"):
+                                token_usage["output_tokens"] += (
+                                    chunk.usage_metadata.candidates_token_count or 0
+                                )
+
+                    return response_text, token_usage
+                else:
+                    # Use non-streaming mode
+                    response = self.client.models.generate_content(
+                        model=self.model,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=self.system_prompt
+                        ),
+                    )
+
+                    # Track token usage if available
+                    if self.debug:
+                        print("response usage_metadata: ", response.usage_metadata)
+                    if hasattr(response, "usage_metadata") and response.usage_metadata:
+                        if hasattr(response.usage_metadata, "prompt_token_count"):
+                            token_usage["input_tokens"] = (
+                                response.usage_metadata.prompt_token_count or 0
+                            )
+                        if hasattr(response.usage_metadata, "candidates_token_count"):
+                            token_usage["output_tokens"] = (
+                                response.usage_metadata.candidates_token_count or 0
+                            )
+
+                    # Return the response text and token usage
+                    return response.text, token_usage
         except Exception as e:
             print(f"\nError sending to Gemini API: {e}")
             traceback.print_exc()
@@ -700,6 +782,7 @@ class StreamToTextChatbot:
         print(f"  AUDIO ENABLED: {self.audio_enabled}")
         print(f"  AUDIO_CACHE_SECONDS: {self.audio_cache_seconds}")
         print(f"  SYSTEM PROMPT: {self.system_prompt}")
+        print(f"  HISTORY: {self.history}")
         if self.video_mode in ["screen", "camera"]:
             print(f"  VIDEO_MODE: {self.video_mode} (enabled)")
         else:
@@ -1068,6 +1151,12 @@ def parse_arguments() -> argparse.Namespace:
         default=config.debug,
         help="Enable debug mode (true/false)",
     )
+    parser.add_argument(
+        "--history",
+        type=bool,
+        default=config.history,
+        help="Enable conversation history (true/false)",
+    )
     return parser.parse_args()
 
 
@@ -1098,6 +1187,7 @@ async def main():
         audio_cache_seconds=args.audio_cache,
         conversation_name=args.conversation_name,
         debug=args.debug,
+        history=args.history,
     )
 
     try:

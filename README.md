@@ -54,6 +54,7 @@ Talk to Gemini AI using your screen, camera, and voice.
 - Use your voice or type text
 - Get text or voice responses
 - Automatically save conversations
+- Conversation memory (with history enabled)
 
 
 ## Configuration
@@ -67,6 +68,7 @@ GEMINI_API_KEY=your_api_key_here
 # Optional (defaults shown)
 MODEL=gemini-2.0-flash-exp
 RESPONSE_MODALITIES=TEXT  # or AUDIO
+HISTORY=true              # Enable conversation memory
 DEFAULT_QUERY="."
 DEFAULT_VIDEO_MODE=screen  # none, screen, camera
 DEFAULT_MONITOR=1
