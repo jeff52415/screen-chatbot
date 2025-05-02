@@ -37,7 +37,7 @@ class Config(BaseSettings):
     video_mode: str = Field(default="screen")
     monitor: int = Field(default=1)
     default_query: str = Field(default=".")
-    model: str = Field(default="gemini-2.0-flash-exp")
+    model: str = Field(default="gemini-2.5-flash-preview-04-17")
     streaming: bool = Field(default=True)
     audio_enabled: bool = Field(default=True)
     audio_cache_seconds: int = Field(default=10)
@@ -159,11 +159,20 @@ class StreamToTextChatbot:
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
         # Initialize chat if history is enabled
+        safety_settings = [
+            types.SafetySetting(
+                category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                threshold="BLOCK_ONLY_HIGH",
+            ),
+        ]
+        setattr(self, "safety_settings", safety_settings)
+
         if self.history:
             self.chat = self.client.aio.chats.create(
                 model=self.model,
                 config=types.GenerateContentConfig(
                     system_instruction=self.system_prompt,
+                    safety_settings=self.safety_settings,
                 ),
             )
 
@@ -537,7 +546,8 @@ class StreamToTextChatbot:
                         model=self.model,
                         contents=contents,
                         config=types.GenerateContentConfig(
-                            system_instruction=self.system_prompt
+                            system_instruction=self.system_prompt,
+                            safety_settings=self.safety_settings,
                         ),
                     ):
                         if chunk.text:
